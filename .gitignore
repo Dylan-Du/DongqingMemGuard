@@ -1,0 +1,10 @@
+# Swift / SPM
+.build/
+.swiftpm/
+Package.resolved
+
+# 构建产物
+dist/
+
+# macOS
+.DS_Store
