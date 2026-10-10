@@ -20,7 +20,7 @@
 
 ## 安装
 
-1. 前往 [Releases](../../releases) 页面下载最新版 `东青MemGuard.dmg`
+1. 前往 [Releases](../../releases) 页面下载最新版 `DongqingMemGuard-v1.0.0.dmg`
 2. 打开 DMG，将「东青MemGuard」拖入「应用程序」文件夹
 3. 首次启动若提示「无法验证开发者」，请在「系统设置 → 隐私与安全性」中点击「仍要打开」
 
