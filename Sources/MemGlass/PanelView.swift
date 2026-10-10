@@ -159,24 +159,34 @@ struct AutoCleanCard: View {
                         .controlSize(.mini)
                         .tint(Palette.accent)
                 } else {
-                    Button("一键授权") { cleaner.installSudoers() }
+                    Button {
+                        cleaner.installSudoers()
+                    } label: {
+                        HStack(spacing: 4) {
+                            if cleaner.isAuthorizing {
+                                ProgressView().controlSize(.mini)
+                            }
+                            Text(cleaner.isAuthorizing ? "等待授权…" : "一键授权")
+                        }
                         .font(.system(size: 10, weight: .semibold))
-                        .buttonStyle(.plain)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 3)
                         .background(Capsule().fill(Palette.accent.opacity(0.18)))
                         .overlay(Capsule().strokeBorder(Palette.accent.opacity(0.4), lineWidth: 1))
                         .foregroundStyle(Palette.accent)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(cleaner.isAuthorizing || cleaner.isCleaning)
                 }
             }
 
             if !cleaner.sudoersInstalled {
-                Text("深度回收才能真正释放内存，需一次性管理员授权（可随时关闭）。")
+                Text("需一次性管理员授权后才能免密回收内存。自动模式只回收系统内存，不会删除你的文件。")
                     .font(.system(size: 9))
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
             } else if autoClean {
-                Text("超过阈值时自动回收系统内存并清理缓存。")
+                Text("内存超阈值时自动回收系统内存（不会删除你的文件）。")
                     .font(.system(size: 9))
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -225,19 +235,25 @@ struct ActionBar: View {
                     .opacity(cleaner.isCleaning ? 0.55 : 1)
                     .shadow(color: Palette.accent.opacity(0.35), radius: 6, y: 2)
             )
-            .disabled(cleaner.isCleaning)
+            .disabled(cleaner.isCleaning || cleaner.isAuthorizing)
 
             Button {
                 NSApp.terminate(nil)
             } label: {
-                Image(systemName: "power")
-                    .font(.system(size: 12, weight: .semibold))
-                    .frame(width: 40, height: 33)
-                    .contentShape(Rectangle())
+                HStack(spacing: 5) {
+                    Image(systemName: "power")
+                        .font(.system(size: 11, weight: .semibold))
+                    Text("退出")
+                        .font(.system(size: 12, weight: .semibold))
+                }
+                .padding(.horizontal, 11)
+                .frame(height: 33)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
             .glassCard(cornerRadius: 11)
+            .help("退出东青MemGuard（也可右键菜单栏图标退出）")
         }
     }
 }

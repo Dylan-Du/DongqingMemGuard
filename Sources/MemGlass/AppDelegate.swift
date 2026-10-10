@@ -35,10 +35,59 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             button.image?.isTemplate = true
             button.imagePosition = .imageLeading
             button.target = self
-            button.action = #selector(togglePopover(_:))
+            button.action = #selector(statusItemClicked(_:))
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
         statusItem = item
+    }
+
+    /// 左键弹面板；右键（或 Control+左键）弹原生菜单，保证「退出」永远可达
+    @objc private func statusItemClicked(_ sender: NSStatusBarButton) {
+        let event = NSApp.currentEvent
+        let isSecondary = event?.type == .rightMouseUp
+            || event?.modifierFlags.contains(.control) == true
+        if isSecondary {
+            showStatusMenu()
+        } else {
+            togglePopover(sender)
+        }
+    }
+
+    private func showStatusMenu() {
+        let menu = NSMenu()
+
+        let open = NSMenuItem(title: "打开面板", action: #selector(openPanelFromMenu), keyEquivalent: "")
+        open.target = self
+        menu.addItem(open)
+
+        let clean = NSMenuItem(title: "立即清理", action: #selector(cleanFromMenu), keyEquivalent: "")
+        clean.target = self
+        menu.addItem(clean)
+
+        menu.addItem(.separator())
+
+        let quit = NSMenuItem(title: "退出东青MemGuard", action: #selector(quitFromMenu), keyEquivalent: "q")
+        quit.target = self
+        menu.addItem(quit)
+
+        // 借用系统机制弹出菜单：临时挂上 menu 触发点击，随后立刻摘除，
+        // 这样左键仍会走 statusItemClicked 弹出面板
+        statusItem?.menu = menu
+        statusItem?.button?.performClick(nil)
+        statusItem?.menu = nil
+    }
+
+    @objc private func openPanelFromMenu() {
+        guard let button = statusItem?.button else { return }
+        if popover?.isShown != true { togglePopover(button) }
+    }
+
+    @objc private func cleanFromMenu() {
+        cleaner.perform(deep: UserDefaults.standard.bool(forKey: "deepClean"))
+    }
+
+    @objc private func quitFromMenu() {
+        NSApp.terminate(nil)
     }
 
     private func updateStatusItem(_ snapshot: MemorySnapshot) {

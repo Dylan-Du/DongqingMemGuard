@@ -22,13 +22,15 @@ final class CleanerModel: ObservableObject {
     static let shared = CleanerModel()
 
     @Published var isCleaning = false
+    @Published var isAuthorizing = false
     @Published var lastCleanDate: Date?
     @Published var lastResult: CleanResult?
     @Published var statusMessage: String?
     @Published var sudoersInstalled: Bool
 
     private var lastAutoClean: Date?
-    private let autoCleanCooldown: TimeInterval = 600
+    /// 自动清理冷却时间放宽到 30 分钟，避免频繁触发 purge 造成系统卡顿
+    private let autoCleanCooldown: TimeInterval = 1800
     private let workQueue = DispatchQueue(label: "com.memglass.cleaner", qos: .utility)
 
     private static let sudoersPath = "/etc/sudoers.d/memglass"
@@ -43,8 +45,7 @@ final class CleanerModel: ObservableObject {
         let defaults = UserDefaults.standard
         // 首次运行时 UserDefaults 中没有该键，需按「默认开启」处理
         let autoCleanEnabled = (defaults.object(forKey: "autoClean") as? Bool) ?? true
-        guard autoCleanEnabled else { return }
-        guard !isCleaning else { return }
+        guard autoCleanEnabled, !isCleaning, !isAuthorizing else { return }
 
         let threshold = defaults.object(forKey: "threshold") as? Double
             ?? MemoryMonitor.recommendedThreshold(forTotal: snap.total)
@@ -55,13 +56,22 @@ final class CleanerModel: ObservableObject {
         if let last = lastAutoClean, Date().timeIntervalSince(last) < autoCleanCooldown { return }
         lastAutoClean = Date()
 
-        perform(deep: defaults.bool(forKey: "deepClean"), automatic: true)
+        /// 自动模式只做「系统内存回收 (purge)」这一件事，且必须已获免密授权；
+        /// 绝不自动删除用户文件，避免误删缓存导致其他应用异常或系统卡顿。
+        if sudoersInstalled {
+            perform(deep: true, automatic: true)
+        } else {
+            UserNotifier.post(
+                title: "内存占用偏高",
+                body: "在东青MemGuard 面板中「一键授权」后，即可自动回收系统内存。"
+            )
+        }
     }
 
     // MARK: - 执行清理
 
     func perform(deep: Bool, automatic: Bool = false) {
-        guard !isCleaning else { return }
+        guard !isCleaning, !isAuthorizing else { return }
         isCleaning = true
         statusMessage = automatic ? "内存超阈值，正在自动清理…" : "正在清理…"
 
@@ -78,11 +88,13 @@ final class CleanerModel: ObservableObject {
                 if result.purged { result.details.append("已执行系统内存回收 (purge)") }
             }
 
-            let safe = Self.safeClean(includeTrash: !automatic)
-            result.freedBytes = safe.freedBytes
-            result.itemsRemoved = safe.itemsRemoved
-            result.cacheCleared = safe.itemsRemoved > 0
-            result.details.append(contentsOf: safe.details)
+            if !automatic {
+                let safe = Self.safeClean()
+                result.freedBytes = safe.freedBytes
+                result.itemsRemoved = safe.itemsRemoved
+                result.cacheCleared = safe.itemsRemoved > 0
+                result.details.append(contentsOf: safe.details)
+            }
 
             DispatchQueue.main.async {
                 self.isCleaning = false
@@ -101,20 +113,17 @@ final class CleanerModel: ObservableObject {
 
     // MARK: - 安全清理（免密）
 
-    /// 清理用户缓存、应用日志、临时文件；自动模式下不动废纸篓，避免误删
-    private static func safeClean(includeTrash: Bool) -> CleanResult {
+    /// 清理用户缓存、应用日志、临时文件（仅手动触发；不动废纸篓，避免误删）
+    private static func safeClean() -> CleanResult {
         var result = CleanResult()
         let fm = FileManager.default
         let home = fm.homeDirectoryForCurrentUser
 
-        var targets: [(URL, TimeInterval, String)] = [
+        let targets: [(URL, TimeInterval, String)] = [
             (home.appendingPathComponent("Library/Caches"), 24 * 3600, "用户缓存"),
             (home.appendingPathComponent("Library/Logs"), 7 * 24 * 3600, "应用日志"),
             (URL(fileURLWithPath: "/private/tmp"), 3 * 24 * 3600, "临时文件")
         ]
-        if includeTrash {
-            targets.append((home.appendingPathComponent(".Trash"), 0, "废纸篓"))
-        }
 
         for (url, maxAge, label) in targets {
             let (bytes, count) = cleanDirectory(url, olderThan: maxAge)
@@ -178,33 +187,62 @@ final class CleanerModel: ObservableObject {
 
     // MARK: - 深度回收授权（一次性）
 
+    /// 授权过程会弹出系统密码框，必须在后台执行，绝不能阻塞主线程，否则 App 会卡死
     func installSudoers() {
-        let user = NSUserName()
-        let content = """
-        # Managed by 东青MemGuard (MemGlass) — 允许免密执行系统内存回收
-        \(user) ALL=(root) NOPASSWD: /usr/sbin/purge
-        """
-        let tmp = "/tmp/memglass_sudoers_\(UUID().uuidString)"
-        do {
-            try content.write(toFile: tmp, atomically: true, encoding: .utf8)
-        } catch {
-            statusMessage = "授权失败：无法写入临时文件"
-            return
-        }
-        let cmd = "visudo -cf '\(tmp)' >/dev/null && chown root:wheel '\(tmp)' && chmod 440 '\(tmp)' && mv '\(tmp)' '\(Self.sudoersPath)'"
-        if Self.runAdmin(cmd) {
-            sudoersInstalled = true
-            statusMessage = "已启用免密深度回收"
-        } else {
-            statusMessage = "授权已取消"
+        guard !isAuthorizing, !isCleaning else { return }
+        isAuthorizing = true
+        statusMessage = "请在系统弹窗中输入管理员密码…"
+
+        workQueue.async { [weak self] in
+            guard let self else { return }
+            let user = NSUserName()
+            let content = """
+            # Managed by 东青MemGuard (MemGlass) — 允许免密执行系统内存回收
+            \(user) ALL=(root) NOPASSWD: /usr/sbin/purge
+            """
+            let tmp = "/tmp/memglass_sudoers_\(UUID().uuidString)"
+            var ok = false
+            var message = "授权已取消"
+
+            do {
+                try content.write(toFile: tmp, atomically: true, encoding: .utf8)
+                let cmd = "visudo -cf '\(tmp)' >/dev/null && chown root:wheel '\(tmp)' && chmod 440 '\(tmp)' && mv '\(tmp)' '\(Self.sudoersPath)'"
+                ok = Self.runAdmin(cmd, timeout: 300)
+                if ok { message = "已启用免密深度回收" }
+            } catch {
+                message = "授权失败：无法写入临时文件"
+            }
+            try? FileManager.default.removeItem(atPath: tmp)
+
+            DispatchQueue.main.async {
+                self.isAuthorizing = false
+                self.sudoersInstalled = ok || FileManager.default.fileExists(atPath: Self.sudoersPath)
+                self.statusMessage = message
+                if self.sudoersInstalled {
+                    UserDefaults.standard.set(true, forKey: "deepClean")
+                }
+            }
         }
     }
 
     func removeSudoers() {
-        if Self.runAdmin("rm -f '\(Self.sudoersPath)'") {
-            sudoersInstalled = false
-            UserDefaults.standard.set(false, forKey: "deepClean")
-            statusMessage = "已关闭深度回收"
+        guard !isAuthorizing, !isCleaning else { return }
+        isAuthorizing = true
+        statusMessage = "正在关闭深度回收…"
+
+        workQueue.async { [weak self] in
+            guard let self else { return }
+            let ok = Self.runAdmin("rm -f '\(Self.sudoersPath)'", timeout: 300)
+            DispatchQueue.main.async {
+                self.isAuthorizing = false
+                if ok {
+                    self.sudoersInstalled = false
+                    UserDefaults.standard.set(false, forKey: "deepClean")
+                    self.statusMessage = "已关闭深度回收"
+                } else {
+                    self.statusMessage = "操作已取消"
+                }
+            }
         }
     }
 
@@ -225,22 +263,33 @@ final class CleanerModel: ObservableObject {
 
     // MARK: - 底层执行
 
-    private static func runProcess(_ path: String, _ args: [String]) -> Bool {
+    /// 执行外部命令并等待结束；带超时保护，避免命令卡住导致后台线程被永久占用
+    private static func runProcess(_ path: String, _ args: [String], timeout: TimeInterval = 120) -> Bool {
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: path)
         proc.arguments = args
         proc.standardOutput = Pipe()
         proc.standardError = Pipe()
         do { try proc.run() } catch { return false }
-        proc.waitUntilExit()
+
+        let deadline = Date().addingTimeInterval(timeout)
+        while proc.isRunning, Date() < deadline {
+            usleep(80_000)
+        }
+        if proc.isRunning {
+            proc.terminate()
+            usleep(200_000)
+            if proc.isRunning { kill(proc.processIdentifier, SIGKILL) }
+            return false
+        }
         return proc.terminationStatus == 0
     }
 
-    private static func runAdmin(_ shellCommand: String) -> Bool {
+    private static func runAdmin(_ shellCommand: String, timeout: TimeInterval = 120) -> Bool {
         let escaped = shellCommand
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
         let script = "do shell script \"\(escaped)\" with administrator privileges"
-        return runProcess("/usr/bin/osascript", ["-e", script])
+        return runProcess("/usr/bin/osascript", ["-e", script], timeout: timeout)
     }
 }
