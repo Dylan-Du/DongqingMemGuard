@@ -16,6 +16,10 @@ final class MemoryMonitor: ObservableObject {
 
     var onSample: ((MemorySnapshot) -> Void)?
 
+    /// 面板是否可见。不可见时不向 SwiftUI 发布数据、也不采集进程列表，
+    /// 避免隐藏状态下仍在每 2 秒重绘整棵视图树造成 CPU 周期性飙高
+    var isPanelVisible = false
+
     private init() {
         applyRecommendedThresholdIfNeeded()
         refresh()
@@ -32,15 +36,18 @@ final class MemoryMonitor: ObservableObject {
 
     func refresh() {
         let snap = MemorySampler.sample()
+        // 菜单栏标题始终刷新（开销极小）
+        onSample?(snap)
+        guard isPanelVisible else { return }
         snapshot = snap
         history.append(snap.usageFraction)
         if history.count > historyLimit {
             history.removeFirst(history.count - historyLimit)
         }
-        onSample?(snap)
     }
 
     func refreshProcesses() {
+        guard isPanelVisible else { return }
         processQueue.async { [weak self] in
             let items = MemorySampler.topProcesses(limit: 5)
             DispatchQueue.main.async { self?.processes = items }

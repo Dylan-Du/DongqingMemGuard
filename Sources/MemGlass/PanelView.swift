@@ -50,6 +50,17 @@ struct HeaderBar: View {
                 .font(.system(size: 14, weight: .semibold))
             Spacer()
             PressureBadge(severity: snapshot.severity)
+            Button {
+                AppQuit.perform()
+            } label: {
+                Image(systemName: "power")
+                    .font(.system(size: 12, weight: .semibold))
+                    .frame(width: 22, height: 22)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .help("退出东青MemGuard")
         }
     }
 }
@@ -238,7 +249,7 @@ struct ActionBar: View {
             .disabled(cleaner.isCleaning || cleaner.isAuthorizing)
 
             Button {
-                NSApp.terminate(nil)
+                AppQuit.perform()
             } label: {
                 HStack(spacing: 5) {
                     Image(systemName: "power")

@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 import UserNotifications
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
     private var statusItem: NSStatusItem?
     private var popover: NSPopover?
@@ -18,6 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.cleaner.autoCleanIfNeeded(snapshot)
         }
         updateStatusItem(monitor.snapshot)
+        monitor.refresh()
 
         UserNotifier.requestAuthorization()
 
@@ -70,11 +71,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         quit.target = self
         menu.addItem(quit)
 
-        // 借用系统机制弹出菜单：临时挂上 menu 触发点击，随后立刻摘除，
-        // 这样左键仍会走 statusItemClicked 弹出面板
+        // 借用系统机制弹出菜单：临时挂上 menu 触发点击，
+        // 等菜单真正收起后再摘除，避免过早清空导致菜单不出现
         statusItem?.menu = menu
         statusItem?.button?.performClick(nil)
-        statusItem?.menu = nil
+        DispatchQueue.main.async { [weak self] in
+            self?.statusItem?.menu = nil
+        }
     }
 
     @objc private func openPanelFromMenu() {
@@ -87,7 +90,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func quitFromMenu() {
-        NSApp.terminate(nil)
+        AppQuit.perform()
+    }
+
+    /// 明确允许退出，避免任何窗口/弹出面板残留导致终止被拦下
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        .terminateNow
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        if let item = statusItem {
+            NSStatusBar.system.removeStatusItem(item)
+            statusItem = nil
+        }
+        popover?.close()
     }
 
     private func updateStatusItem(_ snapshot: MemorySnapshot) {
@@ -103,6 +119,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             popover.performClose(sender)
             return
         }
+        // 打开前先刷新一次，保证面板数据是最新的
+        monitor.isPanelVisible = true
+        monitor.refresh()
+        monitor.refreshProcesses()
+
         // 内容高度会随进程列表变化，展示前按真实尺寸重新定尺，避免弹窗超出屏幕顶部
         if let view = popover.contentViewController?.view {
             view.layoutSubtreeIfNeeded()
@@ -113,18 +134,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
 
+    // 面板收起后停止向 SwiftUI 推送数据，避免隐藏状态下仍在重绘
+    func popoverDidClose(_ notification: Notification) {
+        monitor.isPanelVisible = false
+    }
+
     // MARK: - 弹出面板
 
     private func setUpPopover() {
         let popover = NSPopover()
         popover.behavior = .transient
         popover.animates = true
+        popover.delegate = self
         let controller = NSHostingController(
             rootView: PanelView(monitor: monitor, cleaner: cleaner)
         )
         popover.contentViewController = controller
         popover.contentSize = controller.view.fittingSize
         self.popover = popover
+    }
+}
+
+// MARK: - 退出应用
+
+/// 统一的退出入口：先收起弹出面板、关闭所有窗口，再终止；
+/// 若 0.6 秒后进程仍在（极端情况下终止流程被拦下），直接强制退出兜底。
+enum AppQuit {
+    static func perform() {
+        for window in NSApp.windows where window.isVisible {
+            window.orderOut(nil)
+        }
+        NSApp.terminate(nil)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+            exit(0)
+        }
     }
 }
 
