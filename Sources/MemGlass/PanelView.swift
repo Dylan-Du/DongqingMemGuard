@@ -78,9 +78,9 @@ struct MainCard: View {
 
                 VStack(alignment: .leading, spacing: 9) {
                     StatRow(title: "应用内存", value: formatBytes(snapshot.appMemory), color: Palette.accent)
-                    StatRow(title: "联动内存", value: formatBytes(snapshot.wired), color: Color(red: 0.55, green: 0.55, blue: 0.95))
-                    StatRow(title: "已压缩", value: formatBytes(snapshot.compressed), color: Color(red: 0.72, green: 0.5, blue: 0.98))
-                    StatRow(title: "缓存文件", value: formatBytes(snapshot.cached), color: Color(red: 0.35, green: 0.82, blue: 0.78))
+                    StatRow(title: "联动内存", value: formatBytes(snapshot.wired), color: Color(red: 0.22, green: 0.78, blue: 0.58))
+                    StatRow(title: "已压缩", value: formatBytes(snapshot.compressed), color: Color(red: 0.35, green: 0.72, blue: 0.82))
+                    StatRow(title: "缓存文件", value: formatBytes(snapshot.cached), color: Color(red: 0.62, green: 0.72, blue: 0.30))
                     StatRow(title: "已用交换", value: formatBytes(snapshot.swapUsed), color: Palette.warning)
                 }
             }
@@ -175,16 +175,15 @@ struct AutoCleanCard: View {
                     } label: {
                         HStack(spacing: 4) {
                             if cleaner.isAuthorizing {
-                                ProgressView().controlSize(.mini)
+                                ProgressView().controlSize(.mini).tint(Palette.onAccent)
                             }
                             Text(cleaner.isAuthorizing ? "等待授权…" : "一键授权")
                         }
                         .font(.system(size: 10, weight: .semibold))
                         .padding(.horizontal, 8)
                         .padding(.vertical, 3)
-                        .background(Capsule().fill(Palette.accent.opacity(0.18)))
-                        .overlay(Capsule().strokeBorder(Palette.accent.opacity(0.4), lineWidth: 1))
-                        .foregroundStyle(Palette.accent)
+                        .background(Capsule().fill(Palette.accent))
+                        .foregroundStyle(Palette.onAccent)
                     }
                     .buttonStyle(.plain)
                     .disabled(cleaner.isAuthorizing || cleaner.isCleaning)
@@ -221,7 +220,7 @@ struct ActionBar: View {
             } label: {
                 HStack(spacing: 6) {
                     if cleaner.isCleaning {
-                        ProgressView().controlSize(.small).tint(.white)
+                        ProgressView().controlSize(.small).tint(Palette.onAccent)
                     } else {
                         Image(systemName: "sparkles")
                     }
@@ -233,7 +232,7 @@ struct ActionBar: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .foregroundStyle(.white)
+            .foregroundStyle(Palette.onAccent)
             .background(
                 RoundedRectangle(cornerRadius: 11, style: .continuous)
                     .fill(

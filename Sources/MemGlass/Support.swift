@@ -25,8 +25,12 @@ enum UsageSeverity {
 }
 
 enum Palette {
-    static let accent = Color(red: 0.36, green: 0.62, blue: 1.00)
-    static let accentSoft = Color(red: 0.52, green: 0.84, blue: 1.00)
+    /// 主题色 #c1fd55（亮绿）
+    static let accent = Color(red: 193/255.0, green: 253/255.0, blue: 85/255.0)
+    /// 主题色浅一档，用于渐变高光
+    static let accentSoft = Color(red: 226/255.0, green: 255/255.0, blue: 163/255.0)
+    /// 铺在亮绿主题色之上的文字色（深色，保证在亮绿底上清晰可读）
+    static let onAccent = Color(red: 26/255.0, green: 46/255.0, blue: 6/255.0)
     static let warning = Color(red: 1.00, green: 0.70, blue: 0.26)
     static let critical = Color(red: 1.00, green: 0.37, blue: 0.39)
 
@@ -83,16 +87,28 @@ struct GlassBackground: View {
 
 extension View {
     func glassCard(cornerRadius: CGFloat = 14) -> some View {
-        self
+        modifier(GlassCard(cornerRadius: cornerRadius))
+    }
+}
+
+/// 玻璃卡片：按明暗模式自动切换底色与描边，避免浅色模式下白描边"看不见"
+private struct GlassCard: ViewModifier {
+    var cornerRadius: CGFloat
+    @Environment(\.colorScheme) private var scheme
+
+    func body(content: Content) -> some View {
+        content
             .background(
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .fill(Color.white.opacity(0.055))
+                    .fill(scheme == .dark ? Color.white.opacity(0.07) : Color.black.opacity(0.045))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .strokeBorder(
                         LinearGradient(
-                            colors: [Color.white.opacity(0.16), Color.white.opacity(0.05)],
+                            colors: scheme == .dark
+                                ? [Color.white.opacity(0.18), Color.white.opacity(0.06)]
+                                : [Color.black.opacity(0.12), Color.black.opacity(0.04)],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         ),
@@ -121,8 +137,8 @@ struct PressureBadge: View {
         .background(
             Capsule().fill(Palette.levelColor(severity).opacity(0.16))
         )
-        .overlay(Capsule().strokeBorder(Palette.levelColor(severity).opacity(0.35), lineWidth: 1))
-        .foregroundStyle(Palette.levelColor(severity))
+        .overlay(Capsule().strokeBorder(Palette.levelColor(severity).opacity(0.45), lineWidth: 1))
+        .foregroundStyle(.primary)
     }
 }
 
